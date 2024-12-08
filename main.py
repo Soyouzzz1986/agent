@@ -30,6 +30,8 @@ import tempfile
 app = Flask(__name__)
 CORS(app)  # Activation de CORS pour toutes les routes
 
+CORS(app, resources={r"/*": {"origins": "*"}})# Permet d'accepter les requêtes de mon frontend
+
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
 

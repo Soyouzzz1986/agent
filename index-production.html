@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assistant Vocal - Production</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .controls {
+            margin: 20px 0;
+            text-align: center;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+        }
+        #status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <h1>Assistant Vocal - Version Production</h1>
+    <div class="controls">
+        <button id="startRecord">Commencer l'enregistrement</button>
+        <button id="stopRecord" disabled>Arrêter l'enregistrement</button>
+        <button id="resetConversation">Réinitialiser la conversation</button>
+    </div>
+    <div id="status">Prêt à enregistrer...</div>
+
+    <script>
+        // Configuration pour la production
+        const API_URL = 'https://agent-gkcp.onrender.com';
+        let mediaRecorder;
+        let audioChunks = [];
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    await processAudio(audioBlob);
+                    audioChunks = [];
+                };
+
+                mediaRecorder.start();
+                document.getElementById('startRecord').disabled = true;
+                document.getElementById('stopRecord').disabled = false;
+                updateStatus('Enregistrement en cours...');
+            } catch (error) {
+                console.error('Erreur lors de l\'accès au microphone:', error);
+                updateStatus('Erreur: Impossible d\'accéder au microphone');
+            }
+        }
+
+        function stopRecording() {
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            document.getElementById('startRecord').disabled = false;
+            document.getElementById('stopRecord').disabled = true;
+            updateStatus('Traitement de l\'audio...');
+        }
+
+        async function processAudio(audioBlob) {
+            try {
+                // 1. Transcription
+                const formData = new FormData();
+                formData.append('file', audioBlob);
+                
+                const transcriptionResponse = await fetch(`${API_URL}/transcribe`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const transcriptionData = await transcriptionResponse.json();
+                
+                if (transcriptionData.error) throw new Error(transcriptionData.error);
+                updateStatus('Texte transcrit: ' + transcriptionData.text);
+
+                // 2. Génération de réponse
+                const generationResponse = await fetch(`${API_URL}/generate-response`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text: transcriptionData.text })
+                });
+                const generationData = await generationResponse.json();
+                
+                if (generationData.error) throw new Error(generationData.error);
+                updateStatus('Réponse générée: ' + generationData.text);
+
+                // 3. Synthèse vocale
+                const ttsResponse = await fetch(`${API_URL}/text-to-speech`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text: generationData.text })
+                });
+                
+                if (!ttsResponse.ok) throw new Error('Erreur lors de la synthèse vocale');
+                
+                const audioBlob = await ttsResponse.blob();
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+                audio.play();
+                
+                updateStatus('Lecture de la réponse...');
+            } catch (error) {
+                console.error('Erreur lors du traitement:', error);
+                updateStatus('Erreur: ' + error.message);
+            }
+        }
+
+        async function resetConversation() {
+            try {
+                const response = await fetch(`${API_URL}/reset-conversation`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                updateStatus('Conversation réinitialisée');
+            } catch (error) {
+                console.error('Erreur lors de la réinitialisation:', error);
+                updateStatus('Erreur lors de la réinitialisation de la conversation');
+            }
+        }
+
+        function updateStatus(message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+        }
+
+        document.getElementById('startRecord').addEventListener('click', startRecording);
+        document.getElementById('stopRecord').addEventListener('click', stopRecording);
+        document.getElementById('resetConversation').addEventListener('click', resetConversation);
+    </script>
+</body>
+</html>
